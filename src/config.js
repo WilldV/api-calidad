@@ -10,7 +10,7 @@ const errorHandler = require('./middlewares/error')
 
 const app = express()
 
-app.set('PORT', 8000 || process.env.PORT)
+app.set('PORT', process.env.PORT || 8000)
 
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json())

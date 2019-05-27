@@ -15,6 +15,32 @@ connection.connect(function(err) {
 const ctrl = {}
 
 ctrl.login = (req,res,next) => {
+    try {
+        const body = req.body
+        const email = body.email
+        const password = body.contrasena
+        console.log(email);
+        
+        //bcrypt.compareSync(body.password, this.local.password);
+        connection.query(`SELECT * from profesor where EMAIL="${email}"`,function (error, results, fields) {
+            if (error) return next(new AppError('DatabaseError', error.message));
+            if(results.length==0){
+                connection.query(`SELECT * from administrador where EMAIL="${email}"`,function (error, results2, fields) {
+                    if (error) return next(new AppError('DatabaseError', error.message));
+                    if(results2.length==0) return next(new AppError('NotRegisteredUser',"No se ha registrado ningún usuario con el email especificado." ,404));
+                    if(!bcrypt.compareSync(password, results2[0].CONTRASENA)) return next(new AppError('NotRegisteredUser',"La contraseña ingresada es incorrecta" ,404));
+                    res.send({user: results2[0]})
+                });
+            }else{
+                if(results.length==0) return next(new AppError('NotRegisteredUser',"No se ha registrado ningún usuario con el email especificado" ,404));
+                if(!bcrypt.compareSync(password, results[0].CONTRASENA)) return next(new AppError('NotRegisteredUser',"La contraseña ingresada es incorrecta" ,404));
+                res.send({user: results[0]})
+                
+            }
+        });
+    } catch (error) {
+        next(error)
+    }
 }
 
 ctrl.getTeachers = async (req,res,next) => {
