@@ -4,8 +4,8 @@
   "description": "API-REST para el proyecto de disponibilidad docente del curso de Calidad de Software de la UNMSM.",
   "main": "index.js",
   "scripts": {
-    "dev": "node ./src/index",
-    "start": "nodemon ./src/index"
+    "start": "node ./src/index",
+    "dev": "nodemon ./src/index"
   },
   "author": "Will",
   "license": "ISC",

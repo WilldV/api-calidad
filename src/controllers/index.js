@@ -2,9 +2,9 @@ const bcrypt = require('bcrypt')
 const AppError = require('../util/Error')
 const mysql      = require('mysql');
 const connection = mysql.createConnection({
-    host: "mydbaws.c6lwdd9lyn5d.us-east-2.rds.amazonaws.com",
+    host: "localhost",
     user: "root",
-    password: "holamundo",
+    password: "1234",
     database : 'bdcalidad'
 })
 connection.connect(function(err) {
@@ -19,9 +19,6 @@ ctrl.login = (req,res,next) => {
         const body = req.body
         const email = body.email
         const password = body.contrasena
-        console.log(email);
-        
-        //bcrypt.compareSync(body.password, this.local.password);
         connection.query(`SELECT * from profesor where EMAIL="${email}"`,function (error, results, fields) {
             if (error) return next(new AppError('DatabaseError', error.message));
             if(results.length==0){
@@ -45,10 +42,18 @@ ctrl.login = (req,res,next) => {
 
 ctrl.getTeachers = async (req,res,next) => {
     try {
-        connection.query('SELECT * from profesor',function (error, results, fields) {
-            if (error) return next(new AppError('DatabaseError', error.message));
-            res.send(results)
-        });
+        if(req.query.nombre && req.query.nombre!=''){
+            connection.query(`SELECT * FROM profesor where nombre LIKE '%${req.query.nombre}%' or appaterno LIKE '%${req.query.nombre}%' or apmaterno like '%${req.query.nombre}%'`,function (error, results, fields) {
+                if (error) return next(new AppError('DatabaseError', error.message));
+                res.send(results)
+            })
+        }else{
+            connection.query('SELECT * from profesor',function (error, results, fields) {
+                if (error) return next(new AppError('DatabaseError', error.message));
+                res.send(results)
+            })
+        }
+        
     }catch(err){
         next(err)
     }   
@@ -56,10 +61,18 @@ ctrl.getTeachers = async (req,res,next) => {
 
 ctrl.getCourses = (req,res,next) => {
     try {
-        connection.query('SELECT * from curso',function (error, results, fields) {
-            if (error) return next(new AppError('DatabaseError', error.message));
-            res.send(results)
-        });
+        if(req.query.nombre && req.query.nombre!=''){
+            connection.query(`SELECT * FROM curso where nombrecurso LIKE '%${req.query.nombre}%'` ,function (error, results, fields) {
+                if (error) return next(new AppError('DatabaseError', error.message));
+                res.send(results)
+            });
+        }else{
+            connection.query('SELECT * from curso',function (error, results, fields) {
+                if (error) return next(new AppError('DatabaseError', error.message));
+                res.send(results)
+            });
+        }
+        
     }catch(err){
         next(err)
     } 
@@ -120,6 +133,7 @@ ctrl.getCourseById = (req,res,next) => {
     }  
 }
 
+
 ctrl.postAvailability = (req,res,next) => {
     try {
         const id = req.params.id
@@ -155,9 +169,15 @@ ctrl.postAvailability = (req,res,next) => {
 ctrl.putAvailability = (req,res,next) => {
     const id = req.params.id
     const body = req.body
-    connection.query(`SELECT * FROM profesor where IDPROFESOR = ${id};`,function (error, results, fields) {
+    connection.query(`SELECT * FROM profesor natural join categoria where IDPROFESOR = ${id}`,function (error, results, fields) {
         if (error)  next(new AppError('DatabaseError', error.message));
-        if(results.length == 0)  throw new AppError('TeacherNotFound', "No existe ningún profesor con el id especificado.", 404);
+        if(results.length == 0) return next(new AppError('TeacherNotFound', "No existe ningún profesor con el id especificado.", 404));
+        
+        const err = validateHours(body.horas, results[0].horas_minimas, results[0].horas_maximas)
+        console.log(err);
+        
+        if(err && err=="MAS") return next(new AppError('WrongHoursNumber', `Debe ingresar por lo menos ${results[0].horas_minimas} horas`, 404));
+        if(err && err=="MENOS") return next(new AppError('WrongHoursNumber', `Debe ingresar menos de ${results[0].horas_maximas} horas`, 404))
         connection.query(`DELETE FROM disponibilidad WHERE IDPROFESOR = ${id}`,function (error, results, fields) {
             if (error)  next(new AppError('DatabaseError', error.message));
             if(Array.isArray(body.dia)){
@@ -165,38 +185,58 @@ ctrl.putAvailability = (req,res,next) => {
                     const day = body.dia[i];
                     const hours = body.horas[i].toString()
                     connection.query(`insert into disponibilidad (IDPROFESOR, DIA, HORAS) values (${id},${day},'${hours}')`,function (error, results, fields) {
-                        if (error)  next(new AppError('DatabaseError', error.message));
+                        if (error) return next(new AppError('DatabaseError', error.message));
                     });
                 }
             }else{
                 const day = body.dia;
                 const hours = body.horas.toString()
                 connection.query(`insert into disponibilidad (IDPROFESOR, DIA, HORAS) values (${id},${day},'${hours}')`,function (error, results, fields) {
-                    if (error)  next(new AppError('DatabaseError', error.message));
+                    if (error) return next(new AppError('DatabaseError', error.message));
                 });
             }
             connection.query(`UPDATE profesor SET PERMISO=0 WHERE IDPROFESOR = ${id}`,function (error, results, fields) {
-                if (error)  next(new AppError('DatabaseError', error.message));
+                if (error) return next(new AppError('DatabaseError', error.message));
                 res.send({msg:"Disponibilidad editada"})
             }); 
         });
     });
 }
 
-ctrl.postTeacherCourses = (req,res,next) => {
+function validateHours(hours, min_hours, max_hours){
+    var totalHours = 0;
+    hours.forEach(element => {
+        totalHours+=element.length
+    });
+    
+    if(totalHours<min_hours) return "MAS"
+    if(totalHours>min_hours) return "MENOS"
+    /*if(totalHours<min_hours) return next(new AppError('WrongHoursNumber', `Debe ingresar por lo menos ${min_hours} horas`, 404));
+    if(totalHours>min_hours) return next(new AppError('WrongHoursNumber', `Debe ingresar menos de ${max_hours} horas`, 404));*/
+}
+
+ctrl.postTeacherCourses = async (req,res,next) => {
     try {
         const id = req.params.id
         const body = req.body
+        if(!body.cursos){
+            throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
+        } else if(body.cursos.length!=4){
+            throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
+        }
         connection.query(`SELECT * FROM profesor where IDPROFESOR = ${id};`,function (error, results, fields) {
             if (error) return next(new AppError('DatabaseError', error.message));
             if(results.length == 0) return next(new AppError('TeacherNotFound', "No existe ningún profesor con el id especificado.", 404));
             let values="";
-            body.curso.forEach(curso => {
+            body.cursos.forEach(curso => {
                 values+=`(${curso},${id}),`
             });
             connection.query(`insert into profesor_curso (IDCURSO,IDPROFESOR) values ${values.substring(0,values.length-1)}`,function (error, results, fields) {
                 if (error) return next(new AppError('DatabaseError', error.message)); 
-                res.send({msg:"Cursos editados"})
+                connection.query(`update profesor set PERMISO=0 where IDPROFESOR=${id}`,function (error, results, fields) {
+                    if (error) return next(new AppError('DatabaseError', error.message));
+                    res.send({msg:"Cursos editados"})
+                })
             });
         });
     } catch (error) {
@@ -208,6 +248,11 @@ ctrl.putTeacherCourses = (req,res,next) => {
     try {
         const id = req.params.id
         const body = req.body
+        if(!body.cursos){
+            throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
+        } else if(body.cursos.length1=4){
+            throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
+        }
         connection.query(`SELECT * FROM profesor where IDPROFESOR = ${id};`,function (error, results, fields) {
             if (error) return next(new AppError('DatabaseError', error.message));
             if(results.length == 0)  return next(new AppError('TeacherNotFound', "No existe ningún profesor con el id especificado.", 404));          
@@ -215,12 +260,15 @@ ctrl.putTeacherCourses = (req,res,next) => {
             if (error) return next(new AppError('DatabaseError', error.message));
 
             let values="";
-            body.curso.forEach(curso => {
+            body.cursos.forEach(curso => {
                 values+=`(${curso},${id}),`
             });
             connection.query(`insert into profesor_curso (IDCURSO,IDPROFESOR) values ${values.substring(0,values.length-1)}`,function (error, results, fields) {
-                if (error) return next(new AppError('DatabaseError', error.message)); 
-                res.send({msg:"Cursos editados"})
+                if (error) return next(new AppError('DatabaseError', error.message));
+                connection.query(`update profesor set PERMISO=0 where IDPROFESOR=${id}`,function (error, results, fields) {
+                    if (error) return next(new AppError('DatabaseError', error.message));
+                    res.send({msg:"Cursos editados"})
+                })
             });
             
             });
@@ -277,13 +325,13 @@ ctrl.approvePermission = (req,res,next) => {
                         });
                         break;
                     case "RECHAZADO":
-                        connection.query(`update permiso set estado="RECHAZADO", motivo=${body.motivo} where idpermiso=${idsolicitud}`,function (error, results3, fields) {
+                        connection.query(`update permiso set estado="RECHAZADO", motivo="${body.motivo}" where idpermiso=${idsolicitud}`,function (error, results3, fields) {
                             if (error) return next(new AppError('DatabaseError', error.message));
                             res.send({msg: "Solicitud rechazada."})
                         });
                         break;
                     default:
-                        throw new AppError('StatusNotAllowed', "Ingrese un estado valido.", 404)
+                        return next(new AppError('StatusNotAllowed', "Ingrese un estado valido.", 404));
                 }
             })
         });
