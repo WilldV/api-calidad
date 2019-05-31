@@ -1,5 +1,10 @@
 const bcrypt = require('bcrypt')
+const transporter = require('../util/tranporter')
+const { Parser } = require('json2csv');
 const AppError = require('../util/Error')
+const fs = require('fs')
+var convertapi = require('convertapi')('CgIAv4OY1nhZHALO');
+const path = require('path')
 const mysql      = require('mysql');
 const connection = mysql.createConnection({
     host: "localhost",
@@ -95,7 +100,7 @@ ctrl.getTeacherById = (req,res,next) => {
                 connection.query('select DIA, HORAS from  disponibilidad where IDPROFESOR = '+id+" order by DIA",function (error, results2, fields) {
                     if (error) return next(new AppError('DatabaseError', error.message));
                     profesor.disponibilidad = results2
-                    connection.query('select * from permiso where IDPROFESOR ='+ id + ' order by idpermiso desc limit 1',function (error, results3, fields) {
+                    connection.query('select * from permiso where IDPROFESOR ='+ id + ' and estado = "-"order by idpermiso desc limit 1',function (error, results3, fields) {
                         if (error) return next(new AppError('DatabaseError', error.message));
                         if(results3.length == 0){
                             profesor.solicitud = null
@@ -173,9 +178,10 @@ ctrl.putAvailability = (req,res,next) => {
         if (error)  next(new AppError('DatabaseError', error.message));
         if(results.length == 0) return next(new AppError('TeacherNotFound', "No existe ningún profesor con el id especificado.", 404));
         
-        const err = validateHours(body.horas, results[0].horas_minimas, results[0].horas_maximas)
-        console.log(err);
+        const err = validateHours(body.dia, body.horas, results[0].horas_minimas, results[0].horas_maximas)
         
+        if(err && err=="DIFERENTES") return next(new AppError('WrongHoursAndDaysNumber', `La cantidad de días no concuerda con las horas seleccionadas`, 404))
+        if(err && err=="MINIMO") return next(new AppError('WrongHoursNumber', `Debe seleccionar por lo menos 2 horas por día`, 404))
         if(err && err=="MAS") return next(new AppError('WrongHoursNumber', `Debe ingresar por lo menos ${results[0].horas_minimas} horas`, 404));
         if(err && err=="MENOS") return next(new AppError('WrongHoursNumber', `Debe ingresar menos de ${results[0].horas_maximas} horas`, 404))
         connection.query(`DELETE FROM disponibilidad WHERE IDPROFESOR = ${id}`,function (error, results, fields) {
@@ -203,16 +209,16 @@ ctrl.putAvailability = (req,res,next) => {
     });
 }
 
-function validateHours(hours, min_hours, max_hours){
+function validateHours(days, hours, min_hours, max_hours){
+    if(days.length!=hours.length) return "DIFERENTES"
     var totalHours = 0;
     hours.forEach(element => {
+        if (element.length<2) return "MINIMO"
         totalHours+=element.length
     });
     
     if(totalHours<min_hours) return "MAS"
-    if(totalHours>min_hours) return "MENOS"
-    /*if(totalHours<min_hours) return next(new AppError('WrongHoursNumber', `Debe ingresar por lo menos ${min_hours} horas`, 404));
-    if(totalHours>min_hours) return next(new AppError('WrongHoursNumber', `Debe ingresar menos de ${max_hours} horas`, 404));*/
+    if(totalHours>max_hours) return "MENOS"
 }
 
 ctrl.postTeacherCourses = async (req,res,next) => {
@@ -221,9 +227,9 @@ ctrl.postTeacherCourses = async (req,res,next) => {
         const body = req.body
         if(!body.cursos){
             throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
-        } else if(body.cursos.length!=4){
+        } else if(body.cursos && body.cursos.length!=4){
             throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
-        }
+        } 
         connection.query(`SELECT * FROM profesor where IDPROFESOR = ${id};`,function (error, results, fields) {
             if (error) return next(new AppError('DatabaseError', error.message));
             if(results.length == 0) return next(new AppError('TeacherNotFound', "No existe ningún profesor con el id especificado.", 404));
@@ -314,19 +320,49 @@ ctrl.approvePermission = (req,res,next) => {
                 if (error) return next(new AppError('DatabaseError', error.message));
                 if(results2.length == 0)  return next(new AppError('PermissionNotFound', "No existe ningún permiso con el id especificado.", 404));
                 if(results2[0].estado !="-")  return next(new AppError('NotAllowed', "La solicitud ya ha sido evaluada.", 404));
+                console.log(results[0].EMAIL);
                 switch (body.estado) {
+                    
                     case "APROBADO":
                         connection.query(`update permiso set estado="APROBADO" where idpermiso=${idsolicitud}`,function (error, results3, fields) {
                             if (error) return next(new AppError('DatabaseError', error.message));
                             connection.query(`update profesor set PERMISO=1 where IDPROFESOR=${id}`,function (error, results, fields) {
                                 if (error) return next(new AppError('DatabaseError', error.message));
                             })
+                            
+                            
+                            const approvedMail = {
+                                to: results[0].EMAIL,
+                                from: 'disponibilidad-docente@unmsm.edu.pe',
+                                subject: 'Su solicitud ha sido aprobada',
+                                html: `
+                                  <p>
+                                    Su solicitud para la edición de su disponibilidad y cursos registrados ha sido aprobada.
+
+                                    No responda a este correo.
+                                  </p>
+                                `
+                            }
+                            transporter.sendMail(approvedMail);
                             res.send({msg: "Solicitud aprobada."})
                         });
                         break;
                     case "RECHAZADO":
                         connection.query(`update permiso set estado="RECHAZADO", motivo="${body.motivo}" where idpermiso=${idsolicitud}`,function (error, results3, fields) {
                             if (error) return next(new AppError('DatabaseError', error.message));
+                            const rejectedMail = {
+                                to: results[0].EMAIL,
+                                from: 'disponibilidad-docente@unmsme.edu.pe',
+                                subject: 'Su solicitud ha sido rechazada',
+                                html: `
+                                  <p>
+                                    Su solicitud para la edición de su disponibilidad y cursos registrados ha sido rechazada por el siguiente motivo: ${body.motivo}.
+
+                                    No responda a este correo.
+                                  </p>
+                                `
+                            }
+                            transporter.sendMail(rejectedMail);
                             res.send({msg: "Solicitud rechazada."})
                         });
                         break;
@@ -340,4 +376,56 @@ ctrl.approvePermission = (req,res,next) => {
     }
 }
  
+ctrl.generateReport = (req,res,next) => {
+    try {
+        const fields2 = ["Hora", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
+        const id = req.params.id
+        connection.query('select DIA, HORAS from  disponibilidad where IDPROFESOR = '+id+" order by DIA", async function (error, results2, fields) {
+            if (error) return next(new AppError('DatabaseError', error.message));
+            const availability = results2
+            const json2csvParser = new Parser({ fields2 });
+            const csv = json2csvParser.parse(report(availability));
+            fs.writeFile(path.join(__dirname,`../../reports/disponibilidad.csv`), csv, function (err) {
+                if (err) throw err;
+                console.log('File is created successfully.');
+              }); 
+            await convertapi.convert('xls', {
+                File: path.join(__dirname,`../../reports/disponibilidad.csv`)
+            }, 'csv').then(function(result) {
+                result.saveFiles(path.join(__dirname,`../../reports`));
+            });
+            fs.unlinkSync(path.join(__dirname,`../../reports/disponibilidad.csv`));
+            res.send({ruta: path.join(__dirname,`../../reports/disponibilidad.xls`)})
+        });
+    } catch (error) {
+        next(error)
+    }
+}
+
+function report(availability){
+    const report=[]
+    const week = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
+    var oneDayAvailability;
+    for (let i = 0; i < 14; i++) {
+        oneDayAvailability = {}
+        oneDayAvailability.Hora = i+8
+        for (let j = 0; j < 6; j++) {
+            if(find(j+1, "DIA", availability)){
+                const hours = availability[j].HORAS.split(',')
+                oneDayAvailability[week[j]] = hours.includes((i+8).toString()) ? "X":" "
+            }else{
+                oneDayAvailability[week[j]] = " "
+            }
+        }
+        report.push(oneDayAvailability)
+    }
+    return report
+}
+function find(value, key, array){
+    var flag = false
+    array.forEach(element => {
+        if(element[key] == value.toString()) flag = true
+    });
+    return flag
+}
 module.exports = ctrl;
