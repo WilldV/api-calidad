@@ -1,7 +1,7 @@
 const express = require('express')
 const bodyParser = require('body-parser')
 const morgan = require('morgan')
-
+const cors = require('cors')
 
 const routes = require('./routes')
 const errorHandler = require('./middlewares/error')
@@ -15,6 +15,7 @@ app.use(bodyParser.json())
 app.use(morgan('dev'))
 
 app.use('/api', routes);
+app.use(cors());
 app.use(errorHandler)
 
 module.exports = app
