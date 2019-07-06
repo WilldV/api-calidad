@@ -30,12 +30,14 @@ ctrl.login = (req,res,next) => {
                 connection.query(`SELECT * from administrador where EMAIL="${email}"`,function (error, results2, fields) {
                     if (error) return next(new AppError('DatabaseError', error.message));
                     if(results2.length==0) return next(new AppError('NotRegisteredUser',"No se ha registrado ningún usuario con el email especificado." ,404));
-                    if(!bcrypt.compareSync(password, results2[0].CONTRASENA)) return next(new AppError('NotRegisteredUser',"La contraseña ingresada es incorrecta" ,404));
+                    //if(!bcrypt.compareSync(password, results2[0].CONTRASENA)) return next(new AppError('NotRegisteredUser',"La contraseña ingresada es incorrecta" ,404));
+                    if(password == results2[0].CONTRASENA) return next(new AppError('NotRegisteredUser',"La contraseña ingresada es incorrecta" ,404));
                     res.send({user: results2[0]})
                 });
             }else{
                 if(results.length==0) return next(new AppError('NotRegisteredUser',"No se ha registrado ningún usuario con el email especificado" ,404));
-                if(!bcrypt.compareSync(password, results[0].CONTRASENA)) return next(new AppError('NotRegisteredUser',"La contraseña ingresada es incorrecta" ,404));
+                //if(!bcrypt.compareSync(password, results[0].CONTRASENA)) return next(new AppError('NotRegisteredUser',"La contraseña ingresada es incorrecta" ,404));
+                if(password == results[0].CONTRASENA) return next(new AppError('NotRegisteredUser',"La contraseña ingresada es incorrecta" ,404));
                 res.send({user: results[0]})
                 
             }
@@ -225,11 +227,11 @@ ctrl.postTeacherCourses = async (req,res,next) => {
     try {
         const id = req.params.id
         const body = req.body
-        if(!body.cursos){
+        /*if(!body.cursos){
             throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
         } else if(body.cursos && body.cursos.length!=4){
             throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
-        } 
+        } */
         connection.query(`SELECT * FROM profesor where IDPROFESOR = ${id};`,function (error, results, fields) {
             if (error) return next(new AppError('DatabaseError', error.message));
             if(results.length == 0) return next(new AppError('TeacherNotFound', "No existe ningún profesor con el id especificado.", 404));
@@ -254,11 +256,11 @@ ctrl.putTeacherCourses = (req,res,next) => {
     try {
         const id = req.params.id
         const body = req.body
-        if(!body.cursos){
+        /*if(!body.cursos){
             throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
         } else if(body.cursos.length1=4){
             throw new AppError('WrongNumberCourses', "Debe seleccionar 4 cursos.")
-        }
+        }*/
         connection.query(`SELECT * FROM profesor where IDPROFESOR = ${id};`,function (error, results, fields) {
             if (error) return next(new AppError('DatabaseError', error.message));
             if(results.length == 0)  return next(new AppError('TeacherNotFound', "No existe ningún profesor con el id especificado.", 404));          
@@ -322,7 +324,6 @@ ctrl.approvePermission = (req,res,next) => {
                 if(results2[0].estado !="-")  return next(new AppError('NotAllowed', "La solicitud ya ha sido evaluada.", 404));
                 console.log(results[0].EMAIL);
                 switch (body.estado) {
-                    
                     case "APROBADO":
                         connection.query(`update permiso set estado="APROBADO" where idpermiso=${idsolicitud}`,function (error, results3, fields) {
                             if (error) return next(new AppError('DatabaseError', error.message));
